@@ -83,8 +83,8 @@
 	</path>
 
 	<path id="android.classpath">
-		<fileset dir="${android.dir}">
-			<include name="${android.jar}" />
+		<fileset dir="${sdk.dir}">
+			<include name="platforms/${target}/android.jar" />
 		</fileset>
 	</path>
 </project>
