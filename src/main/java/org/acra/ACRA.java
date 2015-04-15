@@ -92,7 +92,6 @@ public class ACRA {
     public static final String PREF_LAST_VERSION_NR = "acra.lastVersionNr";
 
     private static Application mApplication;
-    private static ReportsCrashes mReportsCrashes;
 
     // Accessible via ACRA#getErrorReporter().
     private static ErrorReporter errorReporterSingleton;
@@ -108,32 +107,70 @@ public class ACRA {
      * method.
      * </p>
      * 
-     * @param app
-     *            Your Application class.
-     * @throws IllegalStateException
-     *             if it is called more than once.
+     * @param app   Your Application class.
+     * @throws IllegalStateException if it is called more than once.
      */
     public static void init(Application app) {
+        final ReportsCrashes reportsCrashes = app.getClass().getAnnotation(ReportsCrashes.class);
+        if (reportsCrashes == null) {
+            log.e(LOG_TAG,
+                    "ACRA#init called but no ReportsCrashes annotation on Application " + app.getPackageName());
+            return;
+        }
+        init(app, new ACRAConfiguration(reportsCrashes));
+    }
+
+    /**
+     * <p>
+     * Initialize ACRA for a given Application. The call to this method should
+     * be placed as soon as possible in the {@link Application#onCreate()}
+     * method.
+     * </p>
+     *
+     * @param app       Your Application class.
+     * @param config    ACRAConfiguration to manually set up ACRA configuration.
+     * @throws IllegalStateException if it is called more than once.
+     */
+    public static void init(Application app, ACRAConfiguration config) {
+        init(app, config, true);
+    }
+
+    /**
+     * <p>
+     * Initialize ACRA for a given Application. The call to this method should
+     * be placed as soon as possible in the {@link Application#onCreate()}
+     * method.
+     * </p>
+     *
+     * @param app       Your Application class.
+     * @param config    ACRAConfiguration to manually set up ACRA configuration.
+     * @param checkReportsOnApplicationStart    Whether to invoke
+     *     ErrorReporter.checkReportsOnApplicationStart(). Apps which adjust the
+     *     ReportSenders should set this to false and call
+     *     checkReportsOnApplicationStart() themselves to prevent a potential
+     *     race with the SendWorker and list of ReportSenders.
+     * @throws IllegalStateException if it is called more than once.
+     */
+    public static void init(Application app, ACRAConfiguration config, boolean checkReportsOnApplicationStart){
 
         if (mApplication != null) {
             log.w(LOG_TAG, "ACRA#init called more than once. Won't do anything more.");
             return;
         }
-
         mApplication = app;
-        mReportsCrashes = mApplication.getClass().getAnnotation(ReportsCrashes.class);
-        if (mReportsCrashes == null) {
-            log.e(LOG_TAG,
-                    "ACRA#init called but no ReportsCrashes annotation on Application " + mApplication.getPackageName());
+        
+        if (config == null) {
+            log.e(LOG_TAG, "ACRA#init called but no ACRAConfiguration provided");
             return;
         }
+        setConfig(config);
 
         final SharedPreferences prefs = getACRASharedPreferences();
 
         try {
-            checkCrashResources();
+            checkCrashResources(config);
 
-            log.d(LOG_TAG, "ACRA is enabled for " + mApplication.getPackageName() + ", intializing...");
+            log.d(LOG_TAG, "ACRA is enabled for " + mApplication.getPackageName() + ", initializing...");
 
             // Initialize ErrorReporter with all required data
             final boolean enableAcra = !shouldDisableACRA(prefs);
@@ -143,6 +180,11 @@ public class ACRA {
             errorReporter.setDefaultReportSenders();
 
             errorReporterSingleton = errorReporter;
+
+            // Check for pending reports
+            if (checkReportsOnApplicationStart) {
+                errorReporter.checkReportsOnApplicationStart();
+            }
 
         } catch (ACRAConfigurationException e) {
             log.w(LOG_TAG, "Error : ", e);
@@ -210,8 +252,7 @@ public class ACRA {
      * @throws ACRAConfigurationException
      *             if required values are missing.
      */
-    static void checkCrashResources() throws ACRAConfigurationException {
-        ReportsCrashes conf = getConfig();
+    static void checkCrashResources(ReportsCrashes conf) throws ACRAConfigurationException {
         switch (conf.mode()) {
         case TOAST:
             if (conf.resToastText() == 0) {
@@ -220,16 +261,19 @@ public class ACRA {
             }
             break;
         case NOTIFICATION:
-            if (conf.resNotifTickerText() == 0 || conf.resNotifTitle() == 0 || conf.resNotifText() == 0
-                    || conf.resDialogText() == 0) {
+            if (conf.resNotifTickerText() == 0 || conf.resNotifTitle() == 0 || conf.resNotifText() == 0) {
                 throw new ACRAConfigurationException(
-                        "NOTIFICATION mode: you have to define at least the resNotifTickerText, resNotifTitle, resNotifText, resDialogText parameters in your application @ReportsCrashes() annotation.");
+                        "NOTIFICATION mode: you have to define at least the resNotifTickerText, resNotifTitle, resNotifText parameters in your application @ReportsCrashes() annotation.");
+            }
+            if (CrashReportDialog.class.equals(conf.reportDialogClass()) && conf.resDialogText() == 0) {
+                throw new ACRAConfigurationException(
+                        "NOTIFICATION mode: using the (default) CrashReportDialog requires you have to define the resDialogText parameter in your application @ReportsCrashes() annotation.");
             }
             break;
         case DIALOG:
-            if (conf.resDialogText() == 0) {
+            if (CrashReportDialog.class.equals(conf.reportDialogClass()) && conf.resDialogText() == 0) {
                 throw new ACRAConfigurationException(
-                        "DIALOG mode: you have to define at least the resDialogText parameters in your application @ReportsCrashes() annotation.");
+                        "DIALOG mode: using the (default) CrashReportDialog requires you to define the resDialogText parameter in your application @ReportsCrashes() annotation.");
             }
             break;
 		default:
@@ -282,6 +326,7 @@ public class ACRA {
     }
 
     /**
+     * @param app       Your Application class.
      * @return new {@link ACRAConfiguration} instance with values initialized
      *         from the {@link ReportsCrashes} annotation.
      */
