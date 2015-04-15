@@ -7,3 +7,5 @@ release.properties
 local.properties
 *.iml
 *.idea/*
+bin-android
+dist
