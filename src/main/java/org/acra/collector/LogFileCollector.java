@@ -53,17 +53,21 @@ class LogFileCollector {
      * @throws IOException
      */
     public static String collectLogFile(Context context, String fileName, int numberOfLines) throws IOException {
-        BoundedLinkedList<String> resultBuffer = new BoundedLinkedList<String>(numberOfLines);
+        final BoundedLinkedList<String> resultBuffer = new BoundedLinkedList<String>(numberOfLines);
         final BufferedReader reader;
         if (fileName.contains("/")) {
             reader = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)), 1024);
         } else {
             reader = new BufferedReader(new InputStreamReader(context.openFileInput(fileName)), 1024);
         }
-        String line = reader.readLine();
-        while (line != null) {
-            resultBuffer.add(line + "\n");
-            line = reader.readLine();
+        try {
+            String line = reader.readLine();
+            while (line != null) {
+                resultBuffer.add(line + "\n");
+                line = reader.readLine();
+            }
+        } finally {
+            CollectorUtil.safeClose(reader);
         }
         return resultBuffer.toString();
     }
